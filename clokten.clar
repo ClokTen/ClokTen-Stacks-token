@@ -1,125 +1,124 @@
-(import redstone-verify 'redstone-verify)
-(import datasource "https://raw.githubusercontent.com/hstove/stacks-fungible-token/main/contracts/sip-010-trait.clar" (sip-010-trait))
+;;  ---------------------------------------------------------
+;; The Official STX token of Clok Ten a member of the Chi-Rock Nation and the creator of ClokLand: A 4 elements Hip-hop virtual w
+;; ---------------------------------------------------------
 
-(define-public contract-name "ClokTen")
+;; Errors 
+(define-constant ERR-UNAUTHORIZED u401)
+(define-constant ERR-NOT-OWNER u402)
+(define-constant ERR-INVALID-PARAMETERS u403)
+(define-constant ERR-NOT-ENOUGH-FUND u101)
 
-(define-public contract-symbol "CLOK")
+(impl-trait 'SP3FBR2AGK5H9QBDH3EEN6DF8EK8JY7RX8QJ5SVTE.sip-010-trait-ft-standard.sip-010-trait)
 
-(define-public contract-decimals 6)
+;; Constants
+(define-constant MAXSUPPLY u1000000000000000)
 
-(define public contract-total-supply (uint 10))
+;; Variables
+(define-fungible-token CLOK10 MAXSUPPLY)
+(define-data-var contract-owner principal tx-sender) 
 
-(define contract-owner (caller))
 
-(define map-balances (ok-map u1))
 
-(define-public contract-token-uri "https://example.com/token-metadata")
-
-(define contract-redstone-contract "SPDBEG5X8XD50SPM1JJH0E5CTXGDV5NJTKAKKR5V.redstone-verify")
-
-(define-public contract-redstone-message-type "timestamp")
-
-(define-public contract-redstone-message-entries "entries")
-
-(define-public contract-redstone-message-signature "signature")
-
-(define-public contract-redstone-update-interval 60)
-
-(define contract-last-redstone-update (optional uint))
-
-(define contract-last-btc-price (optional uint))
-
-(define (get-current-btc-price)
-  (let ((result (datasource.get-data "https://api.coindesk.com/v1/bpi/currentprice.json")))
-    (if (result.err)
-      (err (err u1))
-      (begin
-        (let ((btc-price (result.ok.json.bpi.USD.rate_float)))
-          (ok btc-price))))))
-
-(define-public (get-current-gas-price)
-  (let ((result (blockchain-api get-current-gas-price)))
-    (if (result.err)
-      (err u1)
-      (ok (result.ok.uint)))))
-
-(define-public (update-redstone-data)
-  (if (is-none? contract-last-redstone-update)
+;; SIP-10 Functions
+(define-public (transfer (amount uint) (from principal) (to principal) (memo (optional (buff 34))))
     (begin
-      (let ((btc-price (get-current-btc-price)))
-        (if (btc-price.err)
-          (err (err u1))
-          (begin
-            (map-set contract-last-redstone-update (block-height))
-            (map-set contract-last-btc-price (btc-price.ok))
-            (ok (ok u1))))))  
+        (asserts! (is-eq from tx-sender)
+            (err ERR-UNAUTHORIZED))
+        ;; Perform the token transfer
+        (ft-transfer? CLOK10 amount from to)
+    )
+)
+
+
+;; DEFINE METADATA
+(define-data-var token-uri (optional (string-utf8 256)) (some u"https://gaia.hiro.so/hub/12LwT6sxpkWrUm6Q9in4m2gJf192nRGmWY/clokten-6-decimals.json"))
+
+(define-public (set-token-uri (value (string-utf8 256)))
     (begin
-      (let ((current-height (block-height)))
-        (if (>= (current-height) (+ (contract-last-redstone-update) (contract-redstone-update-interval)))
-          (begin
-            (let ((btc-price (get-current-btc-price)))
-              (if (btc-price.err)
-                (err (err u1))
-                (begin
-                  (map-set contract-last-redstone-update (block-height))
-                  (map-set contract-last-btc-price (btc-price.ok))
-                  (ok (ok u1)))))))))))
+        (asserts! (is-eq tx-sender (var-get contract-owner)) (err ERR-UNAUTHORIZED))
+        (var-set token-uri (some value))
+        (ok (print {
+              notification: "token-metadata-update",
+              payload: {
+                contract-id: (as-contract tx-sender),
+                token-class: "ft"
+              }
+            })
+        )
+    )
+)
 
-(define-public (mirror-btc-price)
-  (let ((redstone-update-result (update-redstone-data)))
-    (if (redstone-update-result.err)
-      (err (err u1))
+
+(define-read-only (get-balance (owner principal))
+  (ok (ft-get-balance CLOK10 owner))
+)
+(define-read-only (get-name)
+  (ok "ClokTen")
+)
+
+(define-read-only (get-symbol)
+  (ok "CLOK10")
+)
+
+(define-read-only (get-decimals)
+  (ok u6)
+)
+
+(define-read-only (get-total-supply)
+  (ok (ft-get-supply CLOK10))
+)
+
+(define-read-only (get-token-uri)
+  (ok (var-get token-uri))
+)
+
+;; transfer ownership
+(define-public (transfer-ownership (new-owner principal))
+  (begin
+    ;; Checks if the sender is the current owner
+    (if (is-eq tx-sender (var-get contract-owner))
       (begin
-        (let ((btc-price (contract-last-btc-price)))
-          (if (is-none? btc-price)
-            (err (err u1))
-            (begin
-              (let ((tx-sender (tx-sender))
-                    (balances (map-get map-balances tx-sender))
-                    (current-balance (map-get balances 0)))
-                (if (>= (current-balance) (contract-total-supply))
-                  (err (err u1))
-                  (begin
-                    (let ((additional-tokens (- (contract-total-supply) (current-balance))))
-                      (if (> additional-tokens 0)
-                        (begin
-                          (let ((additional-stx-required (* 2100 2)))
-                            (let ((gas-price (get-current-gas-price)))
-                              (if (gas-price.err)
-                                (err (err u1))
-                                (let ((additional-stx-required (+ additional-stx-required (gas-price.ok)))))
-                              (if (< additional-stx-required 500000000)
-                                (begin
-                                  (try! (ft-mint? contract-total-supply tx-sender))
-                                  (ok (ok u1)))
-                                (err (err u1))))))))))))))))))
+        ;; Sets the new owner
+        (var-set contract-owner new-owner)
+        ;; Returns success message
+        (ok "Ownership transferred successfully"))
+      ;; Error if the sender is not the owner
+      (err ERR-NOT-OWNER)))
+)
 
-(define-public (ft-mint? (amount uint) (recipient principal))
-  (ft-mint? amount recipient))
 
-(define-public (ft-burn? (amount uint) (sender principal))
-  (ft-burn? amount sender))
+;; ---------------------------------------------------------
+;; Utility Functions
+;; ---------------------------------------------------------
+(define-public (send-many (recipients (list 200 { to: principal, amount: uint, memo: (optional (buff 34)) })))
+  (fold check-err (map send-token recipients) (ok true))
+)
 
-(define-public (ft-transfer? (amount uint) (sender principal) (recipient principal) (memo (optional (buff 34))))
-  (ft-transfer? amount sender recipient memo))
+(define-private (check-err (result (response bool uint)) (prior (response bool uint)))
+  (match prior ok-value result err-value (err err-value))
+)
 
-(define-public (get-name)
-  (contract-name))
+(define-private (send-token (recipient { to: principal, amount: uint, memo: (optional (buff 34)) }))
+  (send-token-with-memo (get amount recipient) (get to recipient) (get memo recipient))
+)
 
-(define-public (get-symbol)
-  (contract-symbol))
+(define-private (send-token-with-memo (amount uint) (to principal) (memo (optional (buff 34))))
+  (let ((transferOk (try! (transfer amount tx-sender to memo))))
+    (ok transferOk)
+  )
+)
 
-(define-public (get-decimals)
-  (contract-decimals))
+(define-private (send-stx (recipient principal) (amount uint))
+  (begin
+    (try! (stx-transfer? amount tx-sender recipient))
+    (ok true) 
+  )
+)
 
-(define-public (get-balance (principal))
-  (map-get map-balances principal 0))
-
-(define-public (get-total-supply)
-  (contract-total-supply))
-
-(define-public (get-token-uri)
-  (contract-token-uri))
-
-(define-public (transfer (amount uint) (sender principal) (recipient principal) (memo (optional (buff 34))))
-  (ft-transfer? amount sender recipient memo))
+;; ---------------------------------------------------------
+;; Mint
+;; ---------------------------------------------------------
+(begin
+    (try! (send-stx 'SP1FQ3DQDR5N9HJX3XC5DNKFCG4DHH48EFJQV6QH0 u5000000))
+    (try! (ft-mint? CLOK10 MAXSUPPLY (var-get contract-owner)))
+)
