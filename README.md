@@ -6,7 +6,7 @@ Token Properties:
 Name: ClokTen
 Symbol: CLOK
 Decimals: 6
-Total Supply: 10 ClokTen tokens
+Total Supply: 1,000,000,000 ClokTen tokens
 External Data Integration:
 The token mirrors the current price of Bitcoin onto its value through the Coindesk API and Redstone framework.
 Interoperability:
